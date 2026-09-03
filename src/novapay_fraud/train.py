@@ -76,6 +76,22 @@ def run() -> dict:
 
     # 5. Train & compare candidate models ---------------------------------
     logger.info("Step 5/7: training candidate models")
+
+    # Compute the recall floor on the VALIDATION window (not test) so
+    # threshold selection respects the same business requirement it will
+    # later be checked against on test data -- rather than discovering
+    # only after the fact, via select_best_model's gate, that an
+    # F1-optimal threshold silently failed to meet it. See
+    # modeling.select_threshold's docstring for why this must be enforced
+    # at threshold-selection time, not just at model-selection time.
+    baseline_valid_metrics = baseline.evaluate(split.raw_valid, split.y_valid)
+    min_recall_floor = baseline_valid_metrics["recall"] * (1 + config.MIN_RECALL_UPLIFT_PCT / 100)
+    logger.info(
+        "    Validation-window rules baseline: recall=%.4f -> required "
+        "recall floor for threshold selection: %.4f",
+        baseline_valid_metrics["recall"], min_recall_floor,
+    )
+
     results = {}
     fitted_models = {}
     for name in config.MODEL_REGISTRY:
@@ -83,7 +99,9 @@ def run() -> dict:
         model = modeling.build_model(name)
         model = modeling.fit_model(name, model, Xt_train, split.y_train)
         proba_valid = modeling.predict_proba_positive(model, Xt_valid)
-        thresh_choice = modeling.select_threshold(split.y_valid, proba_valid)
+        thresh_choice = modeling.select_threshold(
+            split.y_valid, proba_valid, min_recall=min_recall_floor,
+        )
 
         proba_test = modeling.predict_proba_positive(model, Xt_test)
         test_metrics = modeling.evaluate(split.y_test, proba_test, thresh_choice["threshold"])
@@ -94,10 +112,12 @@ def run() -> dict:
             "test_metrics": test_metrics,
         }
         logger.info(
-            "    %s | thr=%.2f  P=%.3f R=%.3f F1=%.3f ROC-AUC=%.3f PR-AUC=%.3f",
+            "    %s | thr=%.2f  P=%.3f R=%.3f F1=%.3f ROC-AUC=%.3f PR-AUC=%.3f "
+            "(validation recall floor met: %s)",
             name, test_metrics["threshold"], test_metrics["precision"],
             test_metrics["recall"], test_metrics["f1"],
             test_metrics["roc_auc"], test_metrics["pr_auc"],
+            thresh_choice.get("recall_floor_met"),
         )
 
     # rules-based baseline, for the required recall-uplift comparison

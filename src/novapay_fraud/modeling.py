@@ -38,6 +38,7 @@ class SplitData:
     y_valid: pd.Series
     X_test: pd.DataFrame
     y_test: pd.Series
+    raw_valid: pd.DataFrame = field(repr=False, default=None)  # for validation-time baseline comparison
     raw_test: pd.DataFrame = field(repr=False, default=None)  # for baseline comparison
 
 
@@ -60,7 +61,7 @@ def time_based_split(df: pd.DataFrame, feature_cols: list[str]) -> SplitData:
         X_train=train_df[feature_cols], y_train=train_df[config.TARGET],
         X_valid=valid_df[feature_cols], y_valid=valid_df[config.TARGET],
         X_test=test_df[feature_cols], y_test=test_df[config.TARGET],
-        raw_test=test_df,
+        raw_valid=valid_df, raw_test=test_df,
     )
 
 
@@ -95,21 +96,72 @@ def predict_proba_positive(model, X) -> np.ndarray:
 
 
 def select_threshold(y_valid: pd.Series, proba_valid: np.ndarray,
-                      grid: list[float] | None = None) -> dict:
-    """Pick the probability threshold on VALIDATION data that maximises F1,
-    subject to a minimum precision floor (fraud review capacity is finite,
-    so we don't want an unbounded flood of false positives even if recall
-    looks great on paper).
+                      grid: list[float] | None = None,
+                      min_recall: float | None = None) -> dict:
+    """Pick the probability threshold on VALIDATION data.
+
+    If `min_recall` is given, this is a CONSTRAINED search: among grid
+    thresholds whose recall clears `min_recall`, pick the one with the
+    highest precision (ties broken by F1). Only if no threshold clears the
+    floor does it fall back to the unconstrained best-F1 choice.
+
+    This constraint exists because pure F1-maximization and the business's
+    actual requirement are NOT the same objective, and treating them as
+    interchangeable is a real bug this project shipped once already: an
+    F1-only search pushed Logistic Regression's threshold to 0.91 (highest
+    F1 of any threshold), which pushed precision to 99.6% but let recall
+    drop from 93.8% to 92.2% -- just enough to fall from a 16.5% recall
+    uplift over the rules baseline to 14.5%, missing the required >=15%
+    floor. F1 does not know that this system's constraint is asymmetric
+    (a missed fraud case is treated as worse than a false-positive review,
+    up to the required recall floor) -- only a recall-constrained search
+    does. `min_recall` should be the validation-window rules-baseline
+    recall scaled up by the required uplift, so the SAME floor the model
+    will later be checked against in `select_best_model` is respected
+    at the point the threshold is actually chosen, not discovered to have
+    been missed only after the fact.
     """
     grid = grid or config.THRESHOLD_GRID
-    best = {"threshold": 0.5, "f1": -1.0}
-    for t in grid:
+
+    def _score(t: float) -> dict:
         preds = (proba_valid >= t).astype(int)
-        p = precision_score(y_valid, preds, zero_division=0)
-        r = recall_score(y_valid, preds, zero_division=0)
-        f1 = f1_score(y_valid, preds, zero_division=0)
-        if f1 > best["f1"]:
-            best = {"threshold": t, "precision": p, "recall": r, "f1": f1}
+        return {
+            "threshold": t,
+            "precision": precision_score(y_valid, preds, zero_division=0),
+            "recall": recall_score(y_valid, preds, zero_division=0),
+            "f1": f1_score(y_valid, preds, zero_division=0),
+        }
+
+    scored = [_score(t) for t in grid]
+
+    if min_recall is not None:
+        passing = [s for s in scored if s["recall"] >= min_recall]
+        if passing:
+            best = max(passing, key=lambda s: (s["precision"], s["f1"]))
+            best["recall_floor_met"] = True
+            best["at_grid_boundary"] = best["threshold"] in (min(grid), max(grid))
+            return best
+        logger.warning(
+            "select_threshold: no grid threshold reaches the required "
+            "min_recall=%.4f on validation data (best available recall "
+            "was %.4f) -- falling back to the unconstrained best-F1 "
+            "threshold, which will NOT meet the recall requirement.",
+            min_recall, max(s["recall"] for s in scored),
+        )
+
+    best = max(scored, key=lambda s: s["f1"])
+    best["recall_floor_met"] = min_recall is None
+    if best["threshold"] in (min(grid), max(grid)):
+        logger.warning(
+            "select_threshold: winning threshold %.2f sits on the search "
+            "grid's boundary (range %.2f-%.2f) -- this usually means the "
+            "true F1-maximizing threshold lies outside the searched range "
+            "and the grid should be widened before trusting this result.",
+            best["threshold"], min(grid), max(grid),
+        )
+        best["at_grid_boundary"] = True
+    else:
+        best["at_grid_boundary"] = False
     return best
 
 

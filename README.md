@@ -13,31 +13,40 @@ real fintech would require before this touches production traffic.
 | Model | Precision | Recall | F1 | ROC-AUC | PR-AUC |
 |---|---|---|---|---|---|
 | Rules baseline (legacy) | 0.667 | 0.805 | 0.729 | — | — |
-| **Logistic Regression (selected)** | **0.923** | **0.938** | **0.931** | **0.983** | **0.969** |
-| Random Forest | 1.000 | 0.919 | 0.958 | 0.973 | 0.955 |
-| XGBoost | 0.979 | 0.919 | 0.948 | 0.971 | 0.953 |
-| LightGBM | 0.973 | 0.919 | 0.945 | 0.968 | 0.952 |
+| **Logistic Regression (selected)** | **0.841** | **0.942** | **0.888** | **0.983** | **0.969** |
+| Random Forest | 0.793 | 0.932 | 0.857 | 0.973 | 0.955 |
+| XGBoost | 0.966 | 0.919 | 0.942 | 0.971 | 0.953 |
+| LightGBM | 0.916 | 0.922 | 0.919 | 0.968 | 0.952 |
 
-- **Recall uplift vs. rules baseline: +16.5%** (requirement: ≥15%) ✅
-- **Model selection is automatic and gated on that requirement, not just
-  ranked by a single metric in isolation.** `modeling.select_best_model`
-  first filters candidates to those meeting the ≥15% recall-uplift
-  requirement, then ranks the survivors by PR-AUC. In this run, **only
-  Logistic Regression clears the gate (16.5%)** — Random Forest, XGBoost,
-  and LightGBM all land at 14.1%, just under the bar — so it is selected
-  both because of the gate and because it also has the best PR-AUC among
-  the full set. If no candidate had cleared the gate, selection would fall
-  back to the best-PR-AUC candidate but flag this explicitly as not meeting
+- **Recall uplift vs. rules baseline: +16.9%** (requirement: ≥15%) ✅
+- **Threshold selection is recall-floor-aware, not pure-F1.** Maximizing
+  F1 alone is a different objective from the business's actual
+  requirement (a hard recall floor), and treating them as interchangeable
+  is a real bug this project shipped once already (see "Design decisions"
+  below). `modeling.select_threshold` now searches for the
+  highest-precision threshold that still clears a recall floor computed
+  from the validation-window rules baseline, falling back to
+  unconstrained best-F1 (with an explicit warning) only if no threshold
+  can clear it.
+- **Model selection is automatic and gated on the same requirement, not
+  just ranked by a single metric in isolation.** `modeling.select_best_model`
+  filters candidates to those meeting the ≥15% recall-uplift requirement
+  on the held-out test set, then ranks the survivors by PR-AUC. In this
+  run, **Logistic Regression (16.9%) and Random Forest (15.7%) both
+  clear the gate** — XGBoost (14.1%) and LightGBM (14.5%) do not — and
+  Logistic Regression is selected for the best PR-AUC among the two that
+  passed. If no candidate had cleared the gate, selection would fall back
+  to the best-PR-AUC candidate but flag this explicitly as not meeting
   the business requirement (see `select_best_model`'s docstring and
   `tests/test_modeling.py`'s fallback-case test) rather than silently
   promoting it.
-- Decision threshold (0.70) chosen on a held-out **validation** split by
-  maximizing F1 — never touched during model selection or test-set scoring
-- Random Forest's 100% test precision is notable, and its recall uplift
-  (14.1%) is preserved alongside every other candidate's in
+- Decision threshold (0.60) chosen on a held-out **validation** split,
+  constrained to meet the recall floor first — never touched during model
+  selection or test-set scoring
+- Every candidate's full precision/recall/threshold, including the ones
+  that didn't pass the gate, is preserved in
   `artifacts/model_metadata.json`'s `recall_uplift_pct_by_candidate` field
-  for a human reviewer to weigh — but it does not meet the stated recall
-  requirement on this test window, which is why it isn't the automatic pick
+  for a human reviewer to audit
 
 **Important, and stated plainly:** the project brief describes fraud as
 "<1% of transactions." The actual measured rate in this dataset is
@@ -233,6 +242,24 @@ flagged":
 
 ## Design decisions worth knowing about
 
+- **Threshold selection is recall-floor-aware, not pure F1 — found by
+  deliberately widening a search grid.** The original threshold search
+  capped out at 0.70, and the F1-optimal threshold happened to land
+  exactly on that boundary — the signature of a clipped search, not a
+  genuine optimum. Widening the grid found the true F1 peak at 0.91, but
+  applying it revealed pure F1-maximization is the *wrong* objective here:
+  at 0.91, precision jumped to 99.6% but recall dropped just enough
+  (93.8% → 92.2%) to fail the required 15% recall-uplift gate across
+  *every* candidate model — a business-critical regression that F1 alone
+  can't see, since F1 has no concept of an asymmetric, hard recall floor.
+  `select_threshold` now takes an optional `min_recall` and searches for
+  the highest-precision threshold that still clears it (computed from the
+  validation-window rules baseline, so the same floor threshold-selection
+  respects is the one `select_best_model` later checks on test data),
+  falling back to unconstrained best-F1 with an explicit warning only if
+  no threshold can clear the floor. `select_threshold` also now warns
+  whenever its winner lands on the grid's own boundary, as a structural
+  guard against this exact failure mode recurring silently.
 - **Time-ordered splits everywhere, never random shuffle-splits.** A fraud
   model validated on transactions that happened before what it trained on
   is validated on a scenario that will never occur in production.
@@ -241,7 +268,7 @@ flagged":
   combos) and scored 89% recall — too strong to represent a "static legacy
   system," which made the required 15%-uplift comparison meaningless. It
   was rebuilt as three independent fixed-threshold checks, which is what a
-  real static rules engine looks like, and is what the 16.5% uplift number
+  real static rules engine looks like, and is what the 16.9% uplift number
   above is measured against.
 - **Duplicate transaction IDs are investigated, not blindly dropped.** A
   repeated `transaction_id` can be a genuine retry with a different
@@ -308,7 +335,7 @@ Beyond that:
   removes most train/serve skew risk, but there's no automated schema
   contract test against a live upstream transaction system (there isn't
   one — this is a portfolio project against a static CSV).
-- **Threshold is global, not segment-aware.** A single 0.70 cutoff is
+- **Threshold is global, not segment-aware.** A single 0.60 cutoff is
   applied to all transactions; a mature system would likely calibrate
   per-corridor or per-channel thresholds given the fraud-rate variation
   seen in the EDA notebook.

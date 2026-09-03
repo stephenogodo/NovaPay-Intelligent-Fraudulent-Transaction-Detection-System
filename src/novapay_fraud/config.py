@@ -90,10 +90,16 @@ VALID_SIZE = 0.15  # carved out of the training window for early stopping / tuni
 
 # Business-driven decision threshold sweep (fraud review is expensive, but
 # missed fraud is worse) -- default operating point is picked on validation
-# data, not hard-coded, but this is the sweep grid used to search it.
-THRESHOLD_GRID = [round(x, 2) for x in
-                   [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-                    0.55, 0.6, 0.65, 0.7]]
+# data, not hard-coded. Coarse 0.05 steps across the low/mid range (where
+# fine resolution rarely changes the F1-maximizing choice) plus fine 0.01
+# steps from 0.70 to 0.99 -- verified by direct sweep that this model's
+# actual F1 peak sits at 0.91, well past where an earlier, narrower grid
+# (capped at 0.70) had artificially clipped the search at its own boundary.
+THRESHOLD_GRID = (
+    [round(x, 2) for x in [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+                            0.55, 0.6, 0.65]]
+    + [round(0.70 + 0.01 * i, 2) for i in range(30)]  # 0.70, 0.71, ..., 0.99
+)
 
 # Minimum recall the business requires the deployed model to hit on the
 # held-out test set relative to a naive rules baseline (see baseline.py).
