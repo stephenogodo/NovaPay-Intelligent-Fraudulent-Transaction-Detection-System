@@ -1,0 +1,20 @@
+# Pinned to the exact versions this project was built and tested against
+# (see README.md "Environment" section). Bump deliberately, not implicitly --
+# an untested version bump in a fraud model's dependency tree is exactly the
+# kind of silent-drift risk this project is designed to avoid elsewhere.
+pandas==3.0.2
+numpy==2.4.4
+scikit-learn==1.8.0
+xgboost==3.4.1
+lightgbm==4.7.0
+shap==0.52.0
+joblib==1.5.3
+pyarrow==25.0.1
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+evidently==0.7.21
+python-multipart==0.0.20
+streamlit==1.63.0
+plotly==5.24.1
+requests==2.33.1

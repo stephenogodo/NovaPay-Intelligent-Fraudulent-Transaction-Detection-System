@@ -1,0 +1,12 @@
+[project]
+name = "novapay-fraud-detection"
+version = "1.0.0"
+description = "Production ML fraud detection system for NovaPay cross-border payments"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
