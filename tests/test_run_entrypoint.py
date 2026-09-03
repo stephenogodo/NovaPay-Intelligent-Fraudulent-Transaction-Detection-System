@@ -75,16 +75,66 @@ def test_train_subcommand_produces_artifacts():
     assert (ROOT / "artifacts" / "fraud_model.joblib").exists()
 
 
+def _kill_windows_port_owner(port: int) -> None:
+    """Find whatever process is actually bound to `port` on Windows and
+    kill it directly, by parsing `netstat -ano` -- sidestepping any
+    assumption about Windows parent-child process-tree relationships
+    entirely.
+
+    Confirmed necessary on this project, not a hypothetical: on a Python
+    3.14 venv (this project's newer per-version installer layout), the
+    venv's own python.exe is a launcher/relay executable rather than a
+    full standalone interpreter copy. A diagnostic session traced a real
+    Windows failure to this directly -- run.py's own reported PID (its
+    venv python.exe) and the PID actually found LISTENING on the API port
+    (a differently-pathed base-install python.exe) were two distinct
+    Windows processes, so `taskkill /F /T /PID <run.py's pid>` -- which
+    walks Windows' own recorded parent-child bookkeeping -- did not
+    reliably reach the one actually serving traffic. Finding the port's
+    owner directly and killing that PID is immune to whether that
+    bookkeeping chain holds, because it uses the one fact this test
+    actually cares about (is anything still listening) as the source of
+    truth, rather than an assumption about how it got there.
+    """
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return
+    for line in result.stdout.splitlines():
+        if "LISTENING" in line and f":{port} " in line.replace("\t", " "):
+            pid = line.split()[-1]
+            subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+
+
 def test_all_no_frontend_starts_api_and_shuts_down_cleanly():
     """Full process-tree test: launch `run.py all --no-frontend`, confirm
-    the API becomes healthy and actually scores a transaction, then send
-    SIGTERM and confirm the child process is gone (not orphaned).
+    the API becomes healthy and actually scores a transaction, then
+    terminate it and confirm the child process is gone (not orphaned).
+
+    Process creation and cleanup are both platform-specific:
+    - os.setsid/os.killpg (creation: preexec_fn=os.setsid; cleanup:
+      killpg with the process group id) are POSIX-only and don't exist on
+      Windows at all -- an AttributeError, not a graceful no-op.
+    - On Windows, cleanup uses `taskkill /F /T /PID` on run.py's own PID
+      as a first pass, THEN separately kills whatever is actually bound
+      to the API port (see `_kill_windows_port_owner`'s docstring) --
+      the tree-kill alone was confirmed insufficient on at least one real
+      Windows/Python 3.14 setup where the process tree Windows records
+      didn't include the process actually serving traffic.
     """
+    popen_kwargs = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["preexec_fn"] = os.setsid
+
     proc = subprocess.Popen(
         [sys.executable, RUN_PY, "all", "--no-frontend",
          "--api-port", "18000", "--startup-timeout", "40"],
         cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        preexec_fn=os.setsid,
+        **popen_kwargs,
     )
     try:
         assert _wait_for(f"{API_URL}/health", timeout=45.0), "API never became healthy"
@@ -99,12 +149,27 @@ def test_all_no_frontend_starts_api_and_shuts_down_cleanly():
         assert score_resp.status_code == 200
         assert 0.0 <= score_resp.json()["fraud_probability"] <= 1.0
     finally:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        try:
-            proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            proc.wait(timeout=5)
+        if os.name == "nt":
+            # First pass: standard tree-kill by run.py's own PID.
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+            )
+            # Second pass, unconditional: whatever is actually bound to
+            # the API port, regardless of whether Windows' recorded
+            # process tree included it (see _kill_windows_port_owner).
+            _kill_windows_port_owner(18000)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait(timeout=5)
 
     # give the child uvicorn a moment to actually release the port
     time.sleep(1.0)

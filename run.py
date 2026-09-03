@@ -177,6 +177,20 @@ def cmd_all(args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGINT, lambda *_: (shutdown(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda *_: (shutdown(), sys.exit(0)))
+    if os.name == "nt":
+        # Windows has no real SIGTERM delivery, and Popen.terminate() calls
+        # TerminateProcess() -- a hard OS-level kill that bypasses Python
+        # signal handlers entirely, so shutdown() above never runs and any
+        # child this process spawned (uvicorn/streamlit) is orphaned,
+        # still running, still serving requests. The actual "catchable"
+        # equivalent on Windows is CTRL_BREAK_EVENT, delivered to this
+        # process's signal handler as SIGBREAK -- but only if this process
+        # was launched in its own process group (CREATE_NEW_PROCESS_GROUP)
+        # and the sender uses send_signal(signal.CTRL_BREAK_EVENT) rather
+        # than terminate(). Found via an actual Windows test run: without
+        # this handler, the API stayed alive and answering requests after
+        # the orchestrator process it belonged to had already been killed.
+        signal.signal(signal.SIGBREAK, lambda *_: (shutdown(), sys.exit(0)))
 
     connect_host = _connect_host(args.host)
     api_url = f"http://{connect_host}:{args.api_port}"
