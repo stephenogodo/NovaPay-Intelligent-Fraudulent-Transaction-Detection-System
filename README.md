@@ -19,14 +19,25 @@ real fintech would require before this touches production traffic.
 | LightGBM | 0.973 | 0.919 | 0.945 | 0.968 | 0.952 |
 
 - **Recall uplift vs. rules baseline: +16.5%** (requirement: ≥15%) ✅
-- Selected on **PR-AUC** (the appropriate metric at ~9% fraud prevalence,
-  not accuracy or ROC-AUC alone)
+- **Model selection is automatic and gated on that requirement, not just
+  ranked by a single metric in isolation.** `modeling.select_best_model`
+  first filters candidates to those meeting the ≥15% recall-uplift
+  requirement, then ranks the survivors by PR-AUC. In this run, **only
+  Logistic Regression clears the gate (16.5%)** — Random Forest, XGBoost,
+  and LightGBM all land at 14.1%, just under the bar — so it is selected
+  both because of the gate and because it also has the best PR-AUC among
+  the full set. If no candidate had cleared the gate, selection would fall
+  back to the best-PR-AUC candidate but flag this explicitly as not meeting
+  the business requirement (see `select_best_model`'s docstring and
+  `tests/test_modeling.py`'s fallback-case test) rather than silently
+  promoting it.
 - Decision threshold (0.70) chosen on a held-out **validation** split by
   maximizing F1 — never touched during model selection or test-set scoring
-- Random Forest's 100% test precision is notable but PR-AUC (which
-  integrates performance across all thresholds) favored Logistic
-  Regression; both are legitimate choices and the trade-off is documented
-  in `artifacts/metrics.json`, not hidden
+- Random Forest's 100% test precision is notable, and its recall uplift
+  (14.1%) is preserved alongside every other candidate's in
+  `artifacts/model_metadata.json`'s `recall_uplift_pct_by_candidate` field
+  for a human reviewer to weigh — but it does not meet the stated recall
+  requirement on this test window, which is why it isn't the automatic pick
 
 **Important, and stated plainly:** the project brief describes fraud as
 "<1% of transactions." The actual measured rate in this dataset is

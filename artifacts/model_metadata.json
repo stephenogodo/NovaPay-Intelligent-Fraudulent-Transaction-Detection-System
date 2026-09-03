@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-09-03T01:27:52.310232+00:00",
+  "created_at": "2026-09-03T09:43:31.527582+00:00",
   "best_model": "logistic_regression",
   "decision_threshold": 0.7,
   "feature_names_raw": [
@@ -94,6 +94,21 @@
   ],
   "recall_uplift_vs_rules_baseline_pct": 16.53225806451612,
   "meets_min_recall_uplift_requirement": true,
+  "selection_reason": "'logistic_regression' selected: highest PR_AUC (0.969) among the 1/4 candidate(s) that met the minimum 15% recall-uplift requirement (achieved 16.5%).",
+  "candidates_passing_recall_gate": [
+    "logistic_regression"
+  ],
+  "candidates_failing_recall_gate": [
+    "random_forest",
+    "xgboost",
+    "lightgbm"
+  ],
+  "recall_uplift_pct_by_candidate": {
+    "logistic_regression": 16.53225806451612,
+    "random_forest": 14.11290322580644,
+    "xgboost": 14.11290322580644,
+    "lightgbm": 14.11290322580644
+  },
   "top_shap_features": [
     "account_very_new",
     "device_low_trust",

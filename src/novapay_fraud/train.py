@@ -108,20 +108,33 @@ def run() -> dict:
     )
 
     # 6. Model selection ---------------------------------------------------
-    # Primary criterion: PR-AUC (appropriate for an imbalanced/rare event),
-    # tie-break on recall uplift over the rules baseline at the chosen
-    # operating threshold, since that is the business's stated success metric.
-    best_name = max(results, key=lambda n: results[n]["test_metrics"]["pr_auc"])
+    # Automatic, gated on the actual business requirement: filter candidates
+    # to those meeting the minimum recall-uplift threshold, then rank the
+    # survivors by PR-AUC. See modeling.select_best_model's docstring for why
+    # this is not the same as simply picking whichever candidate has the
+    # highest PR-AUC in isolation.
+    candidate_test_metrics = {name: r["test_metrics"] for name, r in results.items()}
+    selection = modeling.select_best_model(
+        candidate_test_metrics,
+        baseline_recall=baseline_metrics["recall"],
+        min_recall_uplift_pct=config.MIN_RECALL_UPLIFT_PCT,
+    )
+    best_name = selection.selected_model
     best_model = fitted_models[best_name]
     best_metrics = results[best_name]["test_metrics"]
-    recall_uplift_pct = (
-        (best_metrics["recall"] - baseline_metrics["recall"])
-        / max(baseline_metrics["recall"], 1e-9) * 100
-    )
+    recall_uplift_pct = selection.recall_uplift_pct[best_name]
+
+    logger.info("Model selection: %s", selection.reason)
     logger.info(
         "Selected model: %s (PR-AUC=%.3f, recall uplift vs rules baseline = %.1f%%)",
         best_name, best_metrics["pr_auc"], recall_uplift_pct,
     )
+    if selection.failed_gate:
+        logger.info(
+            "    (candidates that did NOT meet the %.0f%% recall-uplift "
+            "requirement and were excluded from selection: %s)",
+            config.MIN_RECALL_UPLIFT_PCT, ", ".join(selection.failed_gate),
+        )
 
     # 7. Persist artifacts ---------------------------------------------------
     logger.info("Step 6/7: persisting model + explainer artifacts")
@@ -144,6 +157,10 @@ def run() -> dict:
         "feature_names_transformed": feature_names,
         "recall_uplift_vs_rules_baseline_pct": recall_uplift_pct,
         "meets_min_recall_uplift_requirement": recall_uplift_pct >= config.MIN_RECALL_UPLIFT_PCT,
+        "selection_reason": selection.reason,
+        "candidates_passing_recall_gate": selection.passed_gate,
+        "candidates_failing_recall_gate": selection.failed_gate,
+        "recall_uplift_pct_by_candidate": selection.recall_uplift_pct,
         "top_shap_features": global_importance["feature"].tolist(),
         "versions": {
             "python": sys.version.split()[0],

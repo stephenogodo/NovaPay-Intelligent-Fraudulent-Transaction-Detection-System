@@ -131,3 +131,77 @@ def evaluate(y_true, proba, threshold: float) -> dict:
 def precision_recall_table(y_true, proba) -> pd.DataFrame:
     prec, rec, thr = precision_recall_curve(y_true, proba)
     return pd.DataFrame({"precision": prec[:-1], "recall": rec[:-1], "threshold": thr})
+
+
+@dataclass
+class SelectionResult:
+    selected_model: str
+    reason: str
+    passed_gate: list[str]
+    failed_gate: list[str]
+    recall_uplift_pct: dict  # model_name -> uplift percentage, for every candidate
+
+
+def select_best_model(
+    candidate_metrics: dict,
+    baseline_recall: float,
+    min_recall_uplift_pct: float,
+    primary_metric: str = "pr_auc",
+) -> SelectionResult:
+    """Automatically select the best candidate model, gated on the actual
+    business requirement rather than a single metric picked in isolation.
+
+    Selecting purely by PR-AUC (or any single statistical metric) can pick
+    a model that scores well in isolation but fails the requirement that
+    actually matters here: recall must beat the rules-based baseline by at
+    least `min_recall_uplift_pct`. This function makes that check part of
+    selection itself, not something read off a report afterward:
+
+      1. Compute each candidate's recall uplift over the rules baseline.
+      2. Filter to candidates that meet the minimum uplift requirement.
+      3. Among those that pass, select the one with the best `primary_metric`
+         (PR-AUC by default -- the appropriate ranking metric for an
+         imbalanced classification problem).
+      4. If NO candidate passes the gate, fall back to the best
+         `primary_metric` among all candidates, but flag this clearly in the
+         returned reason -- an automatic pipeline should never silently
+         promote a model that fails the stated requirement without saying so.
+
+    candidate_metrics: {model_name: metrics_dict} where metrics_dict has at
+        least "recall" and `primary_metric` keys (as produced by `evaluate`).
+    """
+    uplift = {
+        name: (m["recall"] - baseline_recall) / max(baseline_recall, 1e-9) * 100
+        for name, m in candidate_metrics.items()
+    }
+    passed = [name for name, u in uplift.items() if u >= min_recall_uplift_pct]
+    failed = [name for name in candidate_metrics if name not in passed]
+
+    if passed:
+        selected = max(passed, key=lambda n: candidate_metrics[n][primary_metric])
+        reason = (
+            f"'{selected}' selected: highest {primary_metric.upper()} "
+            f"({candidate_metrics[selected][primary_metric]:.3f}) among the "
+            f"{len(passed)}/{len(candidate_metrics)} candidate(s) that met the "
+            f"minimum {min_recall_uplift_pct:.0f}% recall-uplift requirement "
+            f"(achieved {uplift[selected]:.1f}%)."
+        )
+    else:
+        selected = max(candidate_metrics, key=lambda n: candidate_metrics[n][primary_metric])
+        reason = (
+            f"WARNING: no candidate met the minimum {min_recall_uplift_pct:.0f}% "
+            f"recall-uplift requirement (best achieved was "
+            f"{max(uplift.values()):.1f}%). Falling back to '{selected}', the "
+            f"highest-{primary_metric.upper()} candidate overall "
+            f"({candidate_metrics[selected][primary_metric]:.3f}), but this "
+            f"selection does NOT meet the stated business requirement and "
+            f"should not be promoted without review."
+        )
+
+    return SelectionResult(
+        selected_model=selected,
+        reason=reason,
+        passed_gate=passed,
+        failed_gate=failed,
+        recall_uplift_pct=uplift,
+    )
