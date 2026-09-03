@@ -322,6 +322,40 @@ Beyond that:
   session, including a clean-room venv rebuild — not asserted from
   the plan alone
 
+## Windows notes
+
+The full stack (`run.py`, the API, the test suite) is confirmed working
+on Windows, but getting there surfaced three real, non-obvious platform
+differences worth knowing if you hit something odd:
+
+- **`Popen.terminate()` bypasses Python signal handlers on Windows.** It
+  calls `TerminateProcess()`, a hard OS-level kill — unlike POSIX's
+  `SIGTERM`, code inside the target process never gets a chance to run
+  cleanup logic. `run.py`'s own graceful-shutdown path (which stops the
+  child API/frontend processes it spawned) depends on `run.py` itself
+  actually receiving a signal it can catch.
+- **`taskkill /T` (tree-kill) isn't guaranteed to reach every process a
+  script spawned**, particularly on newer per-version Python installer
+  layouts (observed on 3.14): a venv's `python.exe` there can be a
+  launcher/relay executable rather than a full standalone interpreter
+  copy, so a process it spawns can end up running under a *different*
+  underlying binary than the one Windows records as its child — breaking
+  the parent-child bookkeeping `/T` walks. `sys.executable` reporting the
+  venv's own path doesn't guarantee everything spawned via it stays
+  inside that same recorded process tree.
+- **The practical fix, used in `tests/test_run_entrypoint.py`:** don't
+  assume a process-tree relationship holds at all — find whatever is
+  actually bound to the port you care about (`netstat -ano`, filter for
+  `LISTENING`) and kill that PID directly. This is immune to both of the
+  above, since it uses the fact you actually care about (is anything
+  still serving) as ground truth rather than an assumption about how a
+  process got there.
+
+If you're running this on Windows and see the API still responding after
+you've supposedly stopped it, this is almost certainly why — check
+`netstat -ano | findstr :<port>` for a lingering `LISTENING` PID and kill
+it directly rather than assuming `Ctrl+C` or `taskkill` reached it.
+
 ## Known limitations / honest gaps
 
 - **Single-snapshot dataset.** True drift monitoring needs a live feed of
