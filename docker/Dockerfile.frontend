@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# NovaPay Fraud Detection — Streamlit frontend image
+# Separate image from the API on purpose: the frontend is a thin client
+# (see frontend/app.py's module docstring) with a different, much larger
+# dependency footprint (streamlit + plotly) that has no business being
+# inside the scoring service's container.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 appuser
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ ./src/
+COPY frontend/ ./frontend/
+COPY pyproject.toml .
+
+# The frontend imports novapay_fraud.monitoring directly for the Drift tab
+# (see frontend/app.py) and novapay_fraud.config to locate artifacts/, so
+# the package + a copy of the trained artifacts must be present here too.
+COPY artifacts/ ./artifacts/
+
+RUN pip install --no-cache-dir --no-deps -e . \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3).status==200 else 1)"
+
+CMD ["streamlit", "run", "frontend/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
