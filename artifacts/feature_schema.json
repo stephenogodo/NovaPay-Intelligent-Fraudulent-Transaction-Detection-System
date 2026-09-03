@@ -1,0 +1,31 @@
+{
+  "categorical_features": [
+    "home_country",
+    "source_currency",
+    "dest_currency",
+    "channel",
+    "kyc_tier",
+    "ip_country"
+  ],
+  "boolean_features": [
+    "new_device",
+    "location_mismatch"
+  ],
+  "raw_numeric_features": [
+    "amount_src",
+    "amount_usd",
+    "fee",
+    "exchange_rate_src_to_dest",
+    "ip_risk_score",
+    "account_age_days",
+    "device_trust_score",
+    "chargeback_history_count",
+    "risk_score_internal",
+    "txn_velocity_1h",
+    "txn_velocity_24h",
+    "corridor_risk"
+  ],
+  "timestamp_field": "timestamp",
+  "engineered_at_score_time": true,
+  "note": "The API accepts RAW transaction fields (raw_numeric_features + categorical_features + boolean_features + timestamp_field); time features and risk flags are engineered server-side, mirroring novapay_fraud.features.engineer_features."
+}

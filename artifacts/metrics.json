@@ -1,0 +1,200 @@
+{
+  "candidate_models": {
+    "logistic_regression": {
+      "valid_threshold_selection": {
+        "threshold": 0.7,
+        "precision": 0.8846153846153846,
+        "recall": 0.8679245283018868,
+        "f1": 0.8761904761904762
+      },
+      "test_metrics": {
+        "threshold": 0.7,
+        "precision": 0.9233226837060703,
+        "recall": 0.9383116883116883,
+        "f1": 0.9307568438003221,
+        "roc_auc": 0.9828993736008418,
+        "pr_auc": 0.9685647208194464,
+        "flag_rate": 0.14578481602235677,
+        "n_flagged": 313,
+        "n_total": 2147
+      }
+    },
+    "random_forest": {
+      "valid_threshold_selection": {
+        "threshold": 0.6,
+        "precision": 1.0,
+        "recall": 0.8679245283018868,
+        "f1": 0.9292929292929293
+      },
+      "test_metrics": {
+        "threshold": 0.6,
+        "precision": 1.0,
+        "recall": 0.9188311688311688,
+        "f1": 0.9576988155668359,
+        "roc_auc": 0.9732535680741228,
+        "pr_auc": 0.9554221968495902,
+        "flag_rate": 0.13181183046110853,
+        "n_flagged": 283,
+        "n_total": 2147
+      }
+    },
+    "xgboost": {
+      "valid_threshold_selection": {
+        "threshold": 0.6,
+        "precision": 0.9858156028368794,
+        "recall": 0.8742138364779874,
+        "f1": 0.9266666666666666
+      },
+      "test_metrics": {
+        "threshold": 0.6,
+        "precision": 0.9792387543252595,
+        "recall": 0.9188311688311688,
+        "f1": 0.948073701842546,
+        "roc_auc": 0.9708780887410577,
+        "pr_auc": 0.9531822854340832,
+        "flag_rate": 0.13460642757335817,
+        "n_flagged": 289,
+        "n_total": 2147
+      }
+    },
+    "lightgbm": {
+      "valid_threshold_selection": {
+        "threshold": 0.4,
+        "precision": 0.9928571428571429,
+        "recall": 0.8742138364779874,
+        "f1": 0.9297658862876255
+      },
+      "test_metrics": {
+        "threshold": 0.4,
+        "precision": 0.9725085910652921,
+        "recall": 0.9188311688311688,
+        "f1": 0.9449081803005008,
+        "roc_auc": 0.968431106685593,
+        "pr_auc": 0.9522423809697448,
+        "flag_rate": 0.13553795994410806,
+        "n_flagged": 291,
+        "n_total": 2147
+      }
+    }
+  },
+  "rules_baseline": {
+    "precision": 0.6666666666666666,
+    "recall": 0.8051948051948052,
+    "f1": 0.7294117647058823,
+    "flag_rate": 0.17326502095947835
+  },
+  "selected_model": "logistic_regression",
+  "global_shap_importance": [
+    {
+      "feature": "account_very_new",
+      "mean_abs_shap": 1.0174254871240054
+    },
+    {
+      "feature": "device_low_trust",
+      "mean_abs_shap": 0.5516907284985204
+    },
+    {
+      "feature": "txn_velocity_24h",
+      "mean_abs_shap": 0.529055678295692
+    },
+    {
+      "feature": "velocity_burst",
+      "mean_abs_shap": 0.4561466311484833
+    },
+    {
+      "feature": "kyc_tier_ENHANCED",
+      "mean_abs_shap": 0.45282254083688217
+    },
+    {
+      "feature": "txn_velocity_1h",
+      "mean_abs_shap": 0.39375880578442385
+    },
+    {
+      "feature": "corridor_risk",
+      "mean_abs_shap": 0.3370400620248609
+    },
+    {
+      "feature": "dest_currency_NGN",
+      "mean_abs_shap": 0.3218619599082171
+    },
+    {
+      "feature": "location_mismatch",
+      "mean_abs_shap": 0.28275807801703734
+    },
+    {
+      "feature": "chargeback_history_count",
+      "mean_abs_shap": 0.2638019266812152
+    },
+    {
+      "feature": "risk_score_internal",
+      "mean_abs_shap": 0.2606127962689397
+    },
+    {
+      "feature": "exchange_rate_src_to_dest",
+      "mean_abs_shap": 0.22451469517594003
+    },
+    {
+      "feature": "kyc_tier_LOW",
+      "mean_abs_shap": 0.21857690116043818
+    },
+    {
+      "feature": "device_trust_score",
+      "mean_abs_shap": 0.19748066617467785
+    },
+    {
+      "feature": "source_currency_GBP",
+      "mean_abs_shap": 0.18632208422364416
+    }
+  ],
+  "data_cleaning_report": {
+    "input_rows": 11400,
+    "missingness_vs_target": {
+      "fraud_rate": {
+        "complete": 0.09016018306636156,
+        "has_missing": 0.02526315789473684
+      },
+      "n_rows": {
+        "complete": 10925,
+        "has_missing": 475
+      }
+    },
+    "duplicates": {
+      "full_duplicate_rows": 200,
+      "rows_sharing_a_transaction_id": 400,
+      "partial_duplicates_kept": 0,
+      "fraud_rate_in_dropped_dupes": 0.01,
+      "fraud_rate_overall_before_drop": 0.08745614035087719
+    },
+    "missing_before_drop": {
+      "transaction_id": 0,
+      "customer_id": 0,
+      "timestamp": 60,
+      "home_country": 32,
+      "source_currency": 0,
+      "dest_currency": 0,
+      "channel": 37,
+      "amount_src": 0,
+      "amount_usd": 300,
+      "fee": 290,
+      "exchange_rate_src_to_dest": 0,
+      "device_id": 0,
+      "new_device": 0,
+      "ip_address": 300,
+      "ip_country": 331,
+      "location_mismatch": 0,
+      "ip_risk_score": 0,
+      "kyc_tier": 329,
+      "account_age_days": 0,
+      "device_trust_score": 290,
+      "chargeback_history_count": 0,
+      "risk_score_internal": 0,
+      "txn_velocity_1h": 0,
+      "txn_velocity_24h": 0,
+      "corridor_risk": 0,
+      "is_fraud": 0
+    },
+    "rows_dropped_for_missing": 467,
+    "output_rows": 10733,
+    "output_fraud_rate": 0.09167986583434268
+  }
+}
