@@ -23,6 +23,9 @@ RUN_PY = str(ROOT / "run.py")
 API_URL = "http://localhost:18000"
 FRONTEND_URL = "http://localhost:18501"
 
+sys.path.insert(0, str(ROOT))
+import run as run_module  # noqa: E402  (import after sys.path fix, deliberately)
+
 
 def _wait_for(url: str, timeout: float = 40.0) -> bool:
     deadline = time.time() + timeout
@@ -35,6 +38,23 @@ def _wait_for(url: str, timeout: float = 40.0) -> bool:
             pass
         time.sleep(0.5)
     return False
+
+
+def test_connect_host_translates_bind_any_addresses():
+    """Regression test for a real bug: '0.0.0.0' is a valid bind address
+    (listen on every interface) but not a valid address to connect *to* on
+    Windows -- unlike Linux, which quietly treats a connection to 0.0.0.0
+    as a connection to localhost. This silently broke run.py's own health
+    check (and any URL it printed) for Windows users, even though the
+    server underneath had started and was healthy. _connect_host must
+    translate '0.0.0.0'/'::' to a real loopback address for anything that
+    connects out, while leaving an explicit host (e.g. a LAN IP) untouched.
+    """
+    assert run_module._connect_host("0.0.0.0") == "127.0.0.1"
+    assert run_module._connect_host("::") == "127.0.0.1"
+    assert run_module._connect_host("127.0.0.1") == "127.0.0.1"
+    assert run_module._connect_host("localhost") == "localhost"
+    assert run_module._connect_host("192.168.1.50") == "192.168.1.50"
 
 
 def test_help_runs_and_lists_subcommands():

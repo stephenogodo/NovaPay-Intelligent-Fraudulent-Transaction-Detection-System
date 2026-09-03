@@ -60,6 +60,25 @@ def _child_env() -> dict:
     return env
 
 
+def _connect_host(host: str) -> str:
+    """Translate a bind address into an address that can actually be
+    connected to.
+
+    '0.0.0.0' (and IPv6 '::') mean "listen on every network interface" to a
+    server -- that's the correct default for --host so the service is
+    reachable from other machines/containers. But it is NOT a valid
+    destination for an outgoing connection on Windows: unlike Linux, which
+    quietly treats a connection to 0.0.0.0 as a connection to localhost,
+    Windows just fails to connect. That made run.py's own health check (and
+    the URLs it printed) silently fail on Windows even though the server
+    had started successfully -- this translation is what health checks and
+    printed/passed-along URLs should use instead of the raw bind host.
+    """
+    if host in ("0.0.0.0", "::"):
+        return "127.0.0.1"
+    return host
+
+
 def _log(msg: str) -> None:
     print(f"[novapay] {msg}", flush=True)
 
@@ -101,7 +120,7 @@ def _ensure_trained(force: bool) -> None:
 def cmd_api(args: argparse.Namespace) -> int:
     if not MODEL_PATH.exists():
         _ensure_trained(force=False)
-    _log(f"Starting API on http://{args.host}:{args.api_port} (foreground, Ctrl+C to stop)")
+    _log(f"Starting API on http://{_connect_host(args.host)}:{args.api_port} (foreground, Ctrl+C to stop)")
     return subprocess.call([
         sys.executable, "-m", "uvicorn", "api.main:app",
         "--host", args.host, "--port", str(args.api_port),
@@ -110,8 +129,8 @@ def cmd_api(args: argparse.Namespace) -> int:
 
 def cmd_frontend(args: argparse.Namespace) -> int:
     env = _child_env()
-    env.setdefault("NOVAPAY_API_URL", f"http://{args.host}:{args.api_port}")
-    _log(f"Starting Streamlit console on http://{args.host}:{args.frontend_port} "
+    env.setdefault("NOVAPAY_API_URL", f"http://{_connect_host(args.host)}:{args.api_port}")
+    _log(f"Starting Streamlit console on http://{_connect_host(args.host)}:{args.frontend_port} "
          f"(expects the API at {env['NOVAPAY_API_URL']}, foreground, Ctrl+C to stop)")
     return subprocess.call([
         sys.executable, "-m", "streamlit", "run", "frontend/app.py",
@@ -159,8 +178,9 @@ def cmd_all(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGINT, lambda *_: (shutdown(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda *_: (shutdown(), sys.exit(0)))
 
-    api_url = f"http://{args.host}:{args.api_port}"
-    _log(f"Launching API on {api_url} ...")
+    connect_host = _connect_host(args.host)
+    api_url = f"http://{connect_host}:{args.api_port}"
+    _log(f"Launching API on {api_url} (binding to {args.host}) ...")
     api_proc = subprocess.Popen([
         sys.executable, "-m", "uvicorn", "api.main:app",
         "--host", args.host, "--port", str(args.api_port),
@@ -177,7 +197,7 @@ def cmd_all(args: argparse.Namespace) -> int:
     else:
         env = _child_env()
         env["NOVAPAY_API_URL"] = api_url
-        frontend_url = f"http://{args.host}:{args.frontend_port}"
+        frontend_url = f"http://{connect_host}:{args.frontend_port}"
         _log(f"Launching Streamlit console on {frontend_url} ...")
         frontend_proc = subprocess.Popen([
             sys.executable, "-m", "streamlit", "run", "frontend/app.py",
